@@ -18,6 +18,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate config.yaml from CONFIG_YAML secret
+        env:
+          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+        run: |
+          if [ -n "$CONFIG_YAML" ]; then
+            printf '%s\n' "$CONFIG_YAML" > config.yaml
+            echo "已从 CONFIG_YAML secret 生成 config.yaml"
+          else
+            echo "未配置 CONFIG_YAML，将使用 SKLAND_TOKEN(S) 环境变量"
+          fi
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
