@@ -293,10 +293,48 @@ class ServerChanNotifier(BaseNotifier):
     def __init__(self, cfg: dict):
         self.send_key = cfg["send_key"]
 
+    @staticmethod
+    def _build_title(message: str) -> str:
+        """从签到结果生成紧凑标题，微信通知栏直接可见（Server酱标题上限 32 字符）"""
+        total = 0
+        ok = 0
+        games: dict[str, list[bool]] = {}
+        for line in message.split("\n"):
+            line = line.strip()
+            if not (line.startswith("✅") or line.startswith("❌")):
+                continue
+            body = line[1:].strip()
+            sep = ":" if ":" in body else "："
+            if sep not in body:
+                continue
+            game = body.split(sep, 1)[0].strip()
+            passed = line.startswith("✅")
+            total += 1
+            if passed:
+                ok += 1
+            games.setdefault(game, []).append(passed)
+
+        if not total:
+            return "森空岛签到"
+
+        short_names = {"明日方舟": "方舟", "终末地": "终末地"}
+        parts = []
+        for game, results in games.items():
+            name = short_names.get(game, game)
+            passed = sum(results)
+            if passed == len(results):
+                parts.append(f"{name}x{passed}")
+            else:
+                parts.append(f"{name}{passed}/{len(results)}")
+        summary = " ".join(parts)
+
+        if ok == total:
+            return f"✅ 签到完成 {summary}"
+        return f"⚠️ 签到异常 {summary}"
+
     async def send(self, message: str) -> bool:
         url = f"https://sctapi.ftqq.com/{self.send_key}.send"
-        lines = message.split("\n")
-        title = lines[0] if lines else "森空岛签到通知"
+        title = self._build_title(message)
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, data={
