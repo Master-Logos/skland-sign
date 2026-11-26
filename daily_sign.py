@@ -3,13 +3,14 @@
 
 复用仓库里现有的 skland_api.py / notifier.py / jkju/main.py，不改动它们的签到逻辑。
 每个站点内部最多尝试 2 次（间隔 60 秒），任一成功或"已签到"即视为完成。
+邮件标题直接标注各站成败，正文附带需要用户介入时的具体操作指引。
 """
 
 import asyncio
 import json
 import logging
 import os
-from time import sleep
+from dataclasses import dataclass
 
 import yaml
 
@@ -21,6 +22,62 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("DailySign")
 
 RETRY_DELAY = 60  # 秒
+
+
+# ---------------------------------------------------------------- 结果结构
+
+@dataclass
+class SiteResult:
+    """单个站点的签到结果。"""
+    name: str           # 站点名
+    ok: bool            # 成功或已签到
+    status: str         # ok / captcha / login_failed / site_changed / no_account / error
+    text: str           # 邮件正文中的详细内容
+    action: str = ""    # 需要用户介入时的具体操作指引（空表示无需操作）
+
+
+# 状态 -> (标题图标, 标题里的简短原因)
+STATUS_META = {
+    "ok": ("✅", ""),
+    "captcha": ("⚠️", "验证码"),
+    "login_failed": ("❌", "登录失败"),
+    "site_changed": ("❌", "站点改版"),
+    "no_account": ("❌", "未配置"),
+    "error": ("❌", "异常"),
+}
+
+
+def build_subject(results: list[SiteResult]) -> str:
+    """标题直接写出每个站的成败，例如：✅森空岛 ⚠️镜客居·验证码。"""
+    parts = []
+    for r in results:
+        icon, short = STATUS_META.get(r.status, ("❓", ""))
+        label = f"{icon}{r.name}"
+        if short:
+            label += f"·{short}"
+        parts.append(label)
+    return " ".join(parts)
+
+
+def build_message(results: list[SiteResult]) -> str:
+    """正文包含详细结果；有需要用户处理的事项时，末尾列出具体操作。"""
+    lines = ["📅 每日签到汇总", "════════════════", ""]
+    for i, r in enumerate(results):
+        if i:
+            lines += ["────────────────", ""]
+        lines += r.text.split("\n")
+        lines.append("")
+
+    pending = [(r.name, r.action) for r in results if r.action]
+    lines.append("════════════════")
+    if pending:
+        lines += ["⚠️ 需要你处理", ""]
+        for name, action in pending:
+            lines.append(f"• {name}：{action}")
+            lines.append("")
+    else:
+        lines.append("✅ 两个站都正常，无需操作。")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------- 森空岛
@@ -68,14 +125,19 @@ def _parse_skland_users(config: dict) -> list[dict]:
     return config.get("users", [])
 
 
-async def _sign_skland_once(config: dict) -> tuple[str, bool]:
-    """执行一次森空岛签到，返回 (结果文本, 是否成功)。"""
+async def _sign_skland_once(config: dict) -> SiteResult:
+    """执行一次森空岛签到。"""
     users = _parse_skland_users(config)
     if not users:
-        return "❌ 未配置森空岛账号（SKLAND_TOKEN(S) 或 config.yaml）", False
+        return SiteResult(
+            "森空岛", False, "no_account",
+            "📅 森空岛签到姬\n❌ 未配置账号（SKLAND_TOKEN(S) 或 config.yaml）",
+            "在仓库 Settings → Secrets and variables → Actions 中添加 SKLAND_TOKEN（或 SKLAND_USERS_JSON）。",
+        )
 
     lines = ["📅 森空岛签到姬", ""]
     all_ok = True
+    token_error = False
     api = SklandAPI(max_retries=3)
     try:
         for idx, user in enumerate(users, 1):
@@ -85,7 +147,7 @@ async def _sign_skland_once(config: dict) -> tuple[str, bool]:
             if not token:
                 lines.append("❌ 账号配置错误: 缺少Token")
                 lines.append("")
-                all_ok = False
+                all_ok, token_error = False, True
                 continue
             try:
                 results, _official = await api.do_full_sign_in(token)
@@ -104,6 +166,8 @@ async def _sign_skland_once(config: dict) -> tuple[str, bool]:
                     else:
                         line = f"❌ {r.game}: 失败 ({r.error})"
                         all_ok = False
+                        if any(k in r.error for k in ["token", "Token", "鉴权", "登录", "401", "403"]):
+                            token_error = True
                     lines.append(line)
                     logger.info(f"  - {line}")
             except Exception as exc:
@@ -115,35 +179,58 @@ async def _sign_skland_once(config: dict) -> tuple[str, bool]:
 
     while lines and lines[-1] == "":
         lines.pop()
-    return "\n".join(lines), all_ok
+    text = "\n".join(lines)
+
+    if all_ok:
+        return SiteResult("森空岛", True, "ok", text)
+    if token_error:
+        return SiteResult(
+            "森空岛", False, "login_failed", text,
+            "Token 可能已过期或失效，请重新获取后更新 SKLAND_TOKEN / SKLAND_USERS_JSON Secret。",
+        )
+    return SiteResult(
+        "森空岛", False, "error", text,
+        "签到接口返回异常（非 Token 问题），请查看 Actions 运行日志，必要时把日志发给维护者。",
+    )
 
 
-async def sign_skland(config: dict) -> str:
-    text, ok = await _sign_skland_once(config)
-    if ok:
-        return text
+async def sign_skland(config: dict) -> SiteResult:
+    result = await _sign_skland_once(config)
+    if result.ok:
+        return result
     logger.info("森空岛首次未完全成功，60 秒后重试一次")
     await asyncio.sleep(RETRY_DELAY)
-    text2, _ = await _sign_skland_once(config)
-    return text2
+    return await _sign_skland_once(config)
 
 
 # ---------------------------------------------------------------- 镜客居
 
-def _sign_jkju_once() -> tuple[str, bool]:
+def _sign_jkju_once() -> SiteResult:
     username = os.getenv("JKJU_USER", "").strip()
     password = os.getenv("JKJU_PASSWORD", "").strip()
     is_email = os.getenv("JKJU_MODE", "").strip().lower() == "email"
     if not username or not password:
-        return "❌ 未配置镜客居账号（JKJU_USER / JKJU_PASSWORD）", False
+        return SiteResult(
+            "镜客居", False, "no_account",
+            "📅 镜客居签到\n❌ 未配置账号（JKJU_USER / JKJU_PASSWORD）",
+            "在仓库 Secrets 中添加 JKJU_USER 和 JKJU_PASSWORD。",
+        )
 
     signer = AutoSign(username, password, is_email)
     try:
         status = signer.login()
         if status == 0:
-            return "❌ 本次未签到：网站要求验证码（需手动登录一次或等待冷却）", False
+            return SiteResult(
+                "镜客居", False, "captcha",
+                "📅 镜客居签到\n❌ 网站要求验证码，本次未签到",
+                "用浏览器登录一次 www.jkju.cc 完成验证；或等几小时冷却后，到仓库 Actions 页手动 Run workflow 重试。",
+            )
         if status == -1:
-            return "❌ 本次未签到：登录失败（凭据或站点登录流程可能变更）", False
+            return SiteResult(
+                "镜客居", False, "login_failed",
+                "📅 镜客居签到\n❌ 登录失败（凭据或站点登录流程可能变更）",
+                "请检查 JKJU_PASSWORD Secret 是否仍正确；如果改过站密码，需同步更新 Secret。",
+            )
 
         signer._init_sign_page()
         _, already = signer._parse_sign_button()
@@ -156,27 +243,33 @@ def _sign_jkju_once() -> tuple[str, bool]:
             elif sign_status == 0:
                 result_line = "✅ 今日已签到"
             else:
-                result_line = "❌ 签到失败（响应与预期不符，站点可能改版）"
-                return f"📅 镜客居签到\n{result_line}", False
+                return SiteResult(
+                    "镜客居", False, "site_changed",
+                    "📅 镜客居签到\n❌ 签到失败（响应与预期不符，站点可能改版）",
+                    "站点可能改版导致脚本失效，需要更新代码。请把这封邮件正文发给维护者。",
+                )
 
         signer._init_sign_page()
         trend = signer._get_sign_trend()
         text = f"📅 镜客居签到\n{result_line}"
         if trend:
             text += "\n" + trend
-        return text, True
+        return SiteResult("镜客居", True, "ok", text)
     except Exception as exc:
-        return f"❌ 执行异常 - {type(exc).__name__}: {exc}", False
+        return SiteResult(
+            "镜客居", False, "error",
+            f"📅 镜客居签到\n❌ 执行异常 - {type(exc).__name__}: {exc}",
+            "执行过程出现异常，请把这封邮件正文发给维护者排查。",
+        )
 
 
-async def sign_jkju() -> str:
-    text, ok = _sign_jkju_once()
-    if ok:
-        return text
+async def sign_jkju() -> SiteResult:
+    result = _sign_jkju_once()
+    if result.ok:
+        return result
     logger.info("镜客居首次未完全成功，60 秒后重试一次")
     await asyncio.sleep(RETRY_DELAY)
-    text2, _ = _sign_jkju_once()
-    return text2
+    return _sign_jkju_once()
 
 
 # ---------------------------------------------------------------- 邮件汇总
@@ -185,17 +278,14 @@ async def main():
     config = _load_config()
 
     logger.info("===== 开始森空岛签到 =====")
-    skland_text = await sign_skland(config)
+    skland = await sign_skland(config)
     logger.info("===== 开始镜客居签到 =====")
-    jkju_text = await sign_jkju()
+    jkju = await sign_jkju()
 
-    message = (
-        "📅 每日签到汇总\n"
-        "════════════════\n\n"
-        f"{skland_text}\n\n"
-        "────────────────\n\n"
-        f"{jkju_text}"
-    )
+    results = [skland, jkju]
+    subject = build_subject(results)
+    message = build_message(results)
+    logger.info("邮件标题: %s", subject)
 
     email_user = os.getenv("EMAIL_USER", "").strip()
     email_password = os.getenv("EMAIL_PASSWORD", "").strip()
@@ -215,7 +305,7 @@ async def main():
             "password": email_password,
             "sender": email_user,
             "receiver": email_receiver,
-            "subject": "每日签到汇总",
+            "subject": subject,
         }
     )
     ok = await notifier.send(message)
