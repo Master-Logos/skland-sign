@@ -3,8 +3,13 @@ name: Skland Sign In
 on:
   workflow_dispatch:
   schedule:
-    # UTC 17:00 = Asia/Shanghai 01:00 (+1 day)
-    - cron: "0 17 * * *"
+    # 北京时间早上 7 点附近，三个错峰时间点提高命中率
+    # UTC 23:07 = 北京 07:07
+    - cron: "7 23 * * *"
+    # UTC 23:23 = 北京 07:23
+    - cron: "23 23 * * *"
+    # UTC 23:37 = 北京 07:37
+    - cron: "37 23 * * *"
 
 jobs:
   sign-in:
