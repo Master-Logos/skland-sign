@@ -1,0 +1,54 @@
+name: Daily Sign In
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 北京时间早上 9:17（UTC 01:17），两个站依次签到后统一发一封邮件
+    - cron: "17 1 * * *"
+
+jobs:
+  sign-in:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # 森空岛
+      SKLAND_TOKEN: ${{ secrets.SKLAND_TOKEN }}
+      SKLAND_TOKENS: ${{ secrets.SKLAND_TOKENS }}
+      SKLAND_USERS_JSON: ${{ secrets.SKLAND_USERS_JSON }}
+      # 镜客居
+      JKJU_USER: ${{ secrets.JKJU_USER }}
+      JKJU_PASSWORD: ${{ secrets.JKJU_PASSWORD }}
+      JKJU_MODE: ${{ secrets.JKJU_MODE }}
+      # 邮件汇总
+      EMAIL_USER: ${{ secrets.EMAIL_USER }}
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+      EMAIL_SMTP_HOST: ${{ secrets.EMAIL_SMTP_HOST }}
+      EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate config.yaml from CONFIG_YAML secret
+        env:
+          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+        run: |
+          if [ -n "$CONFIG_YAML" ]; then
+            printf '%s\n' "$CONFIG_YAML" > config.yaml
+            echo "已从 CONFIG_YAML secret 生成 config.yaml"
+          else
+            echo "未配置 CONFIG_YAML，将使用 SKLAND_TOKEN(S) 环境变量"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r jkju/requirements.txt
+
+      - name: Run unified sign in
+        run: python daily_sign.py
