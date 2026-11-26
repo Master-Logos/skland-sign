@@ -1,0 +1,35 @@
+name: JKJU Sign In
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 北京时间早上 8:20 附近，三个错峰时间点提高命中率
+    # UTC 00:17 = 北京 08:17
+    - cron: "17 0 * * *"
+    # UTC 00:20 = 北京 08:20
+    - cron: "20 0 * * *"
+    # UTC 00:23 = 北京 08:23
+    - cron: "23 0 * * *"
+
+jobs:
+  sign-in:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JKJU_USER: ${{ secrets.JKJU_USER }}
+      JKJU_PASSWORD: ${{ secrets.JKJU_PASSWORD }}
+      JKJU_MODE: ${{ secrets.JKJU_MODE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r jkju/requirements.txt
+
+      - name: Run sign in
+        run: python jkju/main.py
