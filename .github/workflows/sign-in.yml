@@ -2,12 +2,10 @@ name: Skland Sign In
 
 on:
   workflow_dispatch:
-  schedule:
-    # 北京时间早上 9:20 附近，三个错峰时间点提高命中率
-    # UTC 01:17 = 北京 09:17
-    - cron: "17 1 * * *"
-    # UTC 01:23 = 北京 09:23
-    - cron: "23 1 * * *"
+  # 定时已迁移到 daily-sign.yml（统一签到 + 邮件汇总），此处保留手动触发
+  # schedule:
+  #   - cron: "17 1 * * *"
+  #   - cron: "23 1 * * *"
 
 jobs:
   sign-in:
