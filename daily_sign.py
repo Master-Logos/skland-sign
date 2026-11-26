@@ -208,7 +208,7 @@ async def main():
 
     notifier = EmailNotifier(
         {
-            "smtp_host": os.getenv("EMAIL_SMTP_HOST", "smtp.163.com"),
+            "smtp_host": os.getenv("EMAIL_SMTP_HOST", "smtp.qq.com"),
             "smtp_port": int(os.getenv("EMAIL_SMTP_PORT", "465")),
             "use_ssl": True,
             "username": email_user,
