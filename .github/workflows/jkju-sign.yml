@@ -2,14 +2,11 @@ name: JKJU Sign In
 
 on:
   workflow_dispatch:
-  schedule:
-    # 北京时间早上 8:20 附近，三个错峰时间点提高命中率
-    # UTC 00:17 = 北京 08:17
-    - cron: "17 0 * * *"
-    # UTC 00:20 = 北京 08:20
-    - cron: "20 0 * * *"
-    # UTC 00:23 = 北京 08:23
-    - cron: "23 0 * * *"
+  # 定时已迁移到 daily-sign.yml（统一签到 + 邮件汇总），此处保留手动触发
+  # schedule:
+  #   - cron: "17 0 * * *"
+  #   - cron: "20 0 * * *"
+  #   - cron: "23 0 * * *"
 
 jobs:
   sign-in:
