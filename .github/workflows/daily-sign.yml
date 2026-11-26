@@ -23,7 +23,7 @@ jobs:
       EMAIL_USER: ${{ secrets.EMAIL_USER }}
       EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
       EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-      EMAIL_SMTP_HOST: smtp.163.com
+      EMAIL_SMTP_HOST: smtp.qq.com
       EMAIL_SMTP_PORT: "465"
     steps:
       - name: Checkout
