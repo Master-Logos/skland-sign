@@ -170,6 +170,7 @@ class EmailNotifier(BaseNotifier):
         self.password = cfg["password"]
         self.sender = cfg.get("sender", self.username)
         self.receiver = cfg["receiver"]
+        self.subject = cfg.get("subject", "森空岛签到通知")
 
     async def send(self, message: str) -> bool:
         # 邮件是同步操作，用 asyncio 包装
@@ -182,7 +183,7 @@ class EmailNotifier(BaseNotifier):
             msg = MIMEMultipart()
             msg["From"] = self.sender
             msg["To"] = self.receiver
-            msg["Subject"] = "森空岛签到通知"
+            msg["Subject"] = self.subject
 
             # 将换行转为 HTML <br> 以保持格式
             html_body = message.replace("\n", "<br>")
