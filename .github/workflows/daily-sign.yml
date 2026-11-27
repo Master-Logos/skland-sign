@@ -18,6 +18,15 @@ on:
   #   # UTC 01:25 = 北京 09:25
   #   - cron: "25 1 * * *"
 
+# 需要写权限：WorkBuddy 凭据每天续期后会轮换，必须把加密后的新凭据提交回仓库
+permissions:
+  contents: write
+
+# 避免错峰点重叠时两次运行抢着 push
+concurrency:
+  group: daily-sign
+  cancel-in-progress: false
+
 jobs:
   sign-in:
     runs-on: ubuntu-latest
@@ -31,6 +40,9 @@ jobs:
       JKJU_USER: ${{ secrets.JKJU_USER }}
       JKJU_PASSWORD: ${{ secrets.JKJU_PASSWORD }}
       JKJU_MODE: ${{ secrets.JKJU_MODE }}
+      # WorkBuddy（WB_SESSION 只在首次运行时用到，之后靠 state/wb_session.enc）
+      WB_SESSION: ${{ secrets.WB_SESSION }}
+      WB_STATE_KEY: ${{ secrets.WB_STATE_KEY }}
       # 邮件汇总
       EMAIL_USER: ${{ secrets.EMAIL_USER }}
       EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
@@ -67,3 +79,20 @@ jobs:
 
       - name: Run unified sign in
         run: python daily_sign.py
+
+      - name: Persist rotated WorkBuddy session
+        if: always()
+        run: |
+          if [ ! -f state/wb_session.enc ]; then
+            echo "没有需要回写的凭据状态"
+            exit 0
+          fi
+          if git diff --quiet -- state/wb_session.enc; then
+            echo "凭据未变化，跳过提交"
+            exit 0
+          fi
+          git config user.name "wb-credits-bot"
+          git config user.email "wb-credits-bot@users.noreply.github.com"
+          git add state/wb_session.enc
+          git commit -m "chore: 更新 WorkBuddy 加密凭据 [skip ci]"
+          git push

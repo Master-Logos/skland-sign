@@ -1,8 +1,8 @@
 # daily_sign.py
-"""统一签到编排：依次完成森空岛与镜客居签到，汇总成一封邮件。
+"""统一签到编排：依次完成森空岛、镜客居、WorkBuddy 签到，汇总成一封邮件。
 
-复用仓库里现有的 skland_api.py / notifier.py / jkju/main.py，不改动它们的签到逻辑。
-每个站点内部最多尝试 2 次（间隔 60 秒），任一成功或"已签到"即视为完成。
+复用仓库里现有的 skland_api.py / notifier.py / jkju/main.py 与 wb_sign.py，不改动它们的签到逻辑。
+森空岛 / 镜客居 每个站点内部最多尝试 2 次（间隔 60 秒），任一成功或"已签到"即视为完成。
 邮件标题直接标注各站成败，正文附带需要用户介入时的具体操作指引。
 """
 
@@ -17,6 +17,7 @@ import yaml
 from notifier import EmailNotifier
 from skland_api import SklandAPI, ALREADY_SIGNED_KEYWORDS
 from jkju.main import AutoSign
+from wb_sign import sign_workbuddy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("DailySign")
@@ -45,6 +46,7 @@ STATUS_META = {
     "site_changed": ("❌", "站点改版"),
     "no_account": ("❌", "未配置"),
     "error": ("❌", "异常"),
+    "inactive": ("⚠️", "未开放"),
 }
 
 
@@ -77,7 +79,7 @@ def build_message(results: list[SiteResult]) -> str:
             lines.append(f"• {name}：{action}")
             lines.append("")
     else:
-        lines.append("✅ 两个站都正常，无需操作。")
+        lines.append(f"✅ {len(results)} 个站都正常，无需操作。")
     return "\n".join(lines)
 
 
@@ -287,19 +289,22 @@ async def main():
     skland = await sign_skland(config)
     logger.info("===== 开始镜客居签到 =====")
     jkju = await sign_jkju()
+    logger.info("===== 开始 WorkBuddy 签到 =====")
+    wb_raw = await sign_workbuddy()
+    wb = SiteResult(wb_raw.name, wb_raw.ok, wb_raw.status, wb_raw.text, wb_raw.action, wb_raw.changed)
 
-    results = [skland, jkju]
+    results = [skland, jkju, wb]
     subject = build_subject(results)
     message = build_message(results)
     logger.info("邮件标题: %s", subject)
 
-    # 多个错峰点去重：定时触发时，若两站都是"今日已签到"且无任何异常，
+    # 多个错峰点去重：定时触发时，若各站都是"今日已签到"且无任何异常，
     # 说明前一个错峰点已经签到并通知过了，本次跳过，避免一天收到多封邮件。
     # 手动触发（force）永远发，方便随时查看状态。
     force_send = os.getenv("FORCE_EMAIL", "").strip().lower() == "true"
     all_settled = all(r.ok and not r.changed and not r.action for r in results)
     if not force_send and all_settled:
-        logger.info("两站均今日已签且无异常，跳过邮件（错峰去重）")
+        logger.info("各站今日均已签到且无异常，跳过邮件（错峰去重）")
         return
 
     email_user = os.getenv("EMAIL_USER", "").strip()
