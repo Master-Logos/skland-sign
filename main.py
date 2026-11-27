@@ -76,7 +76,7 @@ async def run_sign_in():
     # 调整底层库日志等级
     for lib in ["httpx", "httpcore", "skland_api", "Qmsg"]:
         lib_logger = logging.getLogger(lib)
-        lib_logger.setLevel(logging.INFO if user_log_level == "debug" else WARNING)
+        lib_logger.setLevel(logging.INFO if user_log_level == "debug" else logging.WARNING)
 
     users = _parse_users_from_env() or config.get("users", [])
 
@@ -164,9 +164,6 @@ async def run_sign_in():
     await notifier.send_all(final_message)
         
     logger.info("所有任务已完成")
-
-# 补充缺失的常量定义 (防止上面代码报错)
-WARNING = logging.WARNING
 
 if __name__ == "__main__":
     asyncio.run(run_sign_in())

@@ -1,5 +1,6 @@
 # notifier.py
 import httpx
+import html
 import logging
 import smtplib
 from email.mime.text import MIMEText
@@ -185,19 +186,17 @@ class EmailNotifier(BaseNotifier):
             msg["To"] = self.receiver
             msg["Subject"] = self.subject
 
-            # 将换行转为 HTML <br> 以保持格式
-            html_body = message.replace("\n", "<br>")
+            # 先转义再转换行，避免外部内容注入 HTML 或破坏排版
+            html_body = html.escape(message).replace("\n", "<br>")
             msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-            if self.use_ssl:
-                server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port)
-            else:
-                server = smtplib.SMTP(self.smtp_host, self.smtp_port)
-                server.starttls()
-
-            server.login(self.username, self.password)
-            server.sendmail(self.sender, [self.receiver], msg.as_string())
-            server.quit()
+            # 用 with 保证异常时连接也能关闭
+            server_cls = smtplib.SMTP_SSL if self.use_ssl else smtplib.SMTP
+            with server_cls(self.smtp_host, self.smtp_port) as server:
+                if not self.use_ssl:
+                    server.starttls()
+                server.login(self.username, self.password)
+                server.sendmail(self.sender, [self.receiver], msg.as_string())
             logger.info("[Email] 推送成功")
             return True
         except Exception as e:
