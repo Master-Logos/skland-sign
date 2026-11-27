@@ -87,12 +87,13 @@ jobs:
             echo "没有需要回写的凭据状态"
             exit 0
           fi
-          if git diff --quiet -- state/wb_session.enc; then
+          git config user.name "wb-credits-bot"
+          git config user.email "wb-credits-bot@users.noreply.github.com"
+          # 必须先进暂存区：git diff 看不到未跟踪文件，首次生成会被误判成"未变化"
+          git add state/wb_session.enc
+          if git diff --cached --quiet; then
             echo "凭据未变化，跳过提交"
             exit 0
           fi
-          git config user.name "wb-credits-bot"
-          git config user.email "wb-credits-bot@users.noreply.github.com"
-          git add state/wb_session.enc
           git commit -m "chore: 更新 WorkBuddy 加密凭据 [skip ci]"
           git push
