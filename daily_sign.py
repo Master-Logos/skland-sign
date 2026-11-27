@@ -29,11 +29,12 @@ RETRY_DELAY = 60  # 秒
 @dataclass
 class SiteResult:
     """单个站点的签到结果。"""
-    name: str           # 站点名
-    ok: bool            # 成功或已签到
-    status: str         # ok / captcha / login_failed / site_changed / no_account / error
-    text: str           # 邮件正文中的详细内容
-    action: str = ""    # 需要用户介入时的具体操作指引（空表示无需操作）
+    name: str            # 站点名
+    ok: bool             # 成功或已签到
+    status: str          # ok / captcha / login_failed / site_changed / no_account / error
+    text: str            # 邮件正文中的详细内容
+    action: str = ""     # 需要用户介入时的具体操作指引（空表示无需操作）
+    changed: bool = False  # 本次是否真的发生了签到动作（False=今天本来就签过了）
 
 
 # 状态 -> (标题图标, 标题里的简短原因)
@@ -138,6 +139,7 @@ async def _sign_skland_once(config: dict) -> SiteResult:
     lines = ["📅 森空岛签到姬", ""]
     all_ok = True
     token_error = False
+    did_sign = False  # 本次是否实际完成了新签到（而非本来就已签）
     api = SklandAPI(max_retries=3)
     try:
         for idx, user in enumerate(users, 1):
@@ -159,6 +161,7 @@ async def _sign_skland_once(config: dict) -> SiteResult:
                         k in r.error for k in ["已签到", "重复", "already"]
                     )
                     if r.success:
+                        did_sign = True
                         detail = f" ({', '.join(r.awards)})" if r.awards else ""
                         line = f"✅ {r.game}: 成功{detail}"
                     elif already:
@@ -182,7 +185,7 @@ async def _sign_skland_once(config: dict) -> SiteResult:
     text = "\n".join(lines)
 
     if all_ok:
-        return SiteResult("森空岛", True, "ok", text)
+        return SiteResult("森空岛", True, "ok", text, changed=did_sign)
     if token_error:
         return SiteResult(
             "森空岛", False, "login_failed", text,
@@ -234,11 +237,13 @@ def _sign_jkju_once() -> SiteResult:
 
         signer._init_sign_page()
         _, already = signer._parse_sign_button()
+        did_sign = False
         if already:
             result_line = "✅ 今日已签到"
         else:
             sign_status = signer.sign()
             if sign_status == 1:
+                did_sign = True
                 result_line = "✅ 签到成功"
             elif sign_status == 0:
                 result_line = "✅ 今日已签到"
@@ -254,7 +259,7 @@ def _sign_jkju_once() -> SiteResult:
         text = f"📅 镜客居签到\n{result_line}"
         if trend:
             text += "\n" + trend
-        return SiteResult("镜客居", True, "ok", text)
+        return SiteResult("镜客居", True, "ok", text, changed=did_sign)
     except Exception as exc:
         return SiteResult(
             "镜客居", False, "error",
@@ -286,6 +291,15 @@ async def main():
     subject = build_subject(results)
     message = build_message(results)
     logger.info("邮件标题: %s", subject)
+
+    # 多个错峰点去重：定时触发时，若两站都是"今日已签到"且无任何异常，
+    # 说明前一个错峰点已经签到并通知过了，本次跳过，避免一天收到多封邮件。
+    # 手动触发（force）永远发，方便随时查看状态。
+    force_send = os.getenv("FORCE_EMAIL", "").strip().lower() == "true"
+    all_settled = all(r.ok and not r.changed and not r.action for r in results)
+    if not force_send and all_settled:
+        logger.info("两站均今日已签且无异常，跳过邮件（错峰去重）")
+        return
 
     email_user = os.getenv("EMAIL_USER", "").strip()
     email_password = os.getenv("EMAIL_PASSWORD", "").strip()
