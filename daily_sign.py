@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import yaml
 
 from notifier import EmailNotifier
-from skland_api import SklandAPI
+from skland_api import SklandAPI, ALREADY_SIGNED_KEYWORDS
 from jkju.main import AutoSign
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -157,8 +157,9 @@ async def _sign_skland_once(config: dict) -> SiteResult:
                     lines.append("❌ 未找到绑定角色")
                     all_ok = False
                 for r in results:
+                    # 统一使用 skland_api 的关键词集合，避免与 _is_signed_today 口径不一致
                     already = not r.success and any(
-                        k in r.error for k in ["已签到", "重复", "already"]
+                        k in r.error for k in ALREADY_SIGNED_KEYWORDS
                     )
                     if r.success:
                         did_sign = True

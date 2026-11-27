@@ -19,6 +19,10 @@ from urllib.parse import urlparse
 import httpx
 
 logger = logging.getLogger("skland_api")
+
+# 已签到判定关键词，供本模块与 daily_sign.py 共用，避免两套口径
+ALREADY_SIGNED_KEYWORDS = ("已签到", "请勿重复", "重复签到", "重复", "already", "签到过", "今日已")
+
 from Crypto.Cipher import AES, DES, PKCS1_v1_5
 from Crypto.PublicKey import RSA
 from Crypto.Util.Padding import pad
@@ -130,9 +134,7 @@ class SklandAPI:
             return True
         error = result.error.lower() if result.error else ""
         # Match various "already signed" messages
-        return any(keyword in error for keyword in [
-            "已签到", "请勿重复", "重复签到", "already", "签到过", "今日已"
-        ])
+        return any(keyword in error for keyword in ALREADY_SIGNED_KEYWORDS)
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:

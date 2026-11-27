@@ -2,6 +2,11 @@ name: Daily Sign In
 
 on:
   workflow_dispatch:
+    inputs:
+      force_email:
+        description: "强制发送汇总邮件；外部定时服务请传 false"
+        type: boolean
+        default: true
   schedule:
     # 北京时间早上 9:20 附近三个错峰点，对抗 GitHub 定时延迟/漏触发
     # UTC 01:17 = 北京 09:17
@@ -31,7 +36,8 @@ jobs:
       EMAIL_SMTP_HOST: smtp.qq.com
       EMAIL_SMTP_PORT: "465"
       # 手动触发时强制发邮件；定时触发时由脚本按错峰去重逻辑决定
-      FORCE_EMAIL: ${{ github.event_name == 'workflow_dispatch' }}
+      # 外部 cron 通过 workflow_dispatch 触发，必须显式传 force_email=false
+      FORCE_EMAIL: ${{ inputs.force_email }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
